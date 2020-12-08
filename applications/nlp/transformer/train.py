@@ -82,6 +82,7 @@ def make_model(
         num_encoder_layers = num_encoder_layers,
         num_decoder_layers = num_decoder_layers,
         d_kv = d_kv,
+        filter_size = filter_size,
         name='transformer',
     )
     result = transformer(
@@ -174,9 +175,9 @@ def make_model(
                 for idx in range(len(l.weights)):
                     l.weights[idx].optimizer = lbann.NoOptimizer()
 
-    for l in layers:
-        for idx in range(len(l.weights)):
-            l.weights[idx].optimizer = lbann.NoOptimizer()
+    # for l in layers:
+    #     for idx in range(len(l.weights)):
+    #         l.weights[idx].optimizer = lbann.NoOptimizer()
     # for l in layers:
     #     l.device = "GPU"
     return lbann.Model(

@@ -118,6 +118,7 @@ int allocate_trainer_resources(lbann_comm *comm) {
       || trainer_grid_height != comm->get_trainer_grid().Height()) {
     comm->split_trainers(procs_per_trainer, trainer_grid_height);
   }
+  comm->split_trainer_grid(2,0);
 
   return procs_per_trainer;
 }

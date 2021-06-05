@@ -169,6 +169,12 @@ public:
    */
   void split_trainers(int procs_per_trainer=-1, int trainer_grid_height=-1);
 
+  /** Split the commicator for the given trainer into primary and seconday*/
+  void split_trainer_grid(int num_process_primary_grid=0, int num_process_secondary_grid=0);
+
+  /** Get trainer grid number (0: no primary/secondary grid, 1: part of primary grid, 2: part of secondary grid). */
+  inline int get_grid_number() const noexcept { return m_grid_number; }
+
   /** Get which trainer this process is in. */
   inline int get_trainer_rank() const noexcept { return m_trainer_rank; }
   /** Get the rank of this process in its trainer. */
@@ -870,6 +876,12 @@ public:
     return m_trainer_comm;
   }
 
+  /** Return the combined grid communicator for a trainer. */
+  const El::mpi::Comm& get_combined_grid_comm() const noexcept
+  {
+    return m_combined_grid_comm;
+  }
+
   /** Return the world communicator. */
   const El::mpi::Comm& get_world_comm() const noexcept { return m_world_comm; }
 
@@ -906,6 +918,12 @@ private:
   El::mpi::Comm m_intertrainer_comm;
   /** Communicator for every process in the same compute node. */
   El::mpi::Comm m_node_comm;
+  /** Communicator for primary grid in each trainer */
+  El::mpi::Comm m_primary_grid_comm;
+  /** Communicator for secondary grid in each trainer */
+  El::mpi::Comm m_secondary_grid_comm;
+  /** Combined communicator for primary and secondary grid in each trainer */
+  El::mpi::Comm m_combined_grid_comm;
   /** Packed group communicators. */
   mutable std::unordered_map<int, El::mpi::Comm> m_group_communicators;
   /** Grid for this trainer. */
@@ -922,6 +940,12 @@ private:
   int m_procs_per_node;
   /** Rank of this process within its compute node. */
   int m_rank_in_node;
+  /**
+  0: Default (Primary or secondary grids not initialized)
+  1: Primary grid
+  2: Secondary grid 
+  */
+  int m_grid_number = 0;
   /** The list of world ranks that are on this compute node. */
   std::vector<int> m_world_ranks_on_node;
   /** Default number of threads per process.

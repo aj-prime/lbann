@@ -91,8 +91,76 @@ void kfac<Device>::on_epoch_end(model *m) {
   }
 }
 
+
+
+
+template <typename DataType, El::Device Device>
+void send_recv_precomputed_gradients(
+    const std::vector<std::pair<size_t, El::AbstractMatrix<DataType>*>>&  blocks,
+    El::Matrix<DataType, Device>& global_buffer,
+    const int data_size,
+    lbann_comm *comm,
+    const kfac_allgather_mode mode) {
+
+  const int comm_size = El::mpi::Size(comm->get_trainer_comm().GetMPIComm());
+  const int comm_rank = El::mpi::Rank(comm->get_trainer_comm().GetMPIComm());
+
+  const El::mpi::Comm & combined_comm = comm->get_combined_grid_comm();
+  const El::mpi::Comm & trainer_comm = comm->get_trainer_comm();
+  El::SyncInfo<Device> sync_info =El::SyncInfoFromMatrix(global_buffer);
+
+  if(comm->get_grid_number() == 2)
+  {
+    ::El::mpi::Send(
+       (DataType*)global_buffer.Buffer(),
+       data_size,
+       comm_rank,
+       combined_comm.GetMPIComm(),
+       sync_info);
+
+  }
+  if(comm->get_grid_number() == 1)
+  {
+    ::El::mpi::Recv(
+       (DataType*)global_buffer.Buffer(),
+       data_size,
+       comm_rank+comm_size,
+       combined_comm.GetMPIComm(),
+       sync_info);
+
+    // Sort blocks so that received blocks per process become
+    // contiguous.
+    std::vector<std::pair<size_t, El::AbstractMatrix<DataType>*>> sorted_blocks(blocks.size());
+    std::copy(blocks.begin(), blocks.end(), sorted_blocks.begin());
+    if(mode == kfac_allgather_mode::ALLGATHER)
+      std::stable_sort(
+          sorted_blocks.begin(), sorted_blocks.end(),
+          [](const std::pair<size_t, El::AbstractMatrix<DataType>*>& lhs,
+             const std::pair<size_t, El::AbstractMatrix<DataType>*>& rhs) {
+            return lhs.first < rhs.first;
+          });
+
+    // Copy blocks from the buffer.
+    {
+      size_t offset = 0;
+      for(auto& block : sorted_blocks) {
+        if(block.first != (size_t) comm->get_rank_in_trainer()) {
+          const auto view = El::LockedView(global_buffer, El::IR(offset, offset+block.second->Height()), El::ALL);
+          El::Copy(view, *block.second);
+        }
+        offset += block.second->Height();
+      }
+    }
+  }
+}
+
+
 template <El::Device Device>
 void kfac<Device>::on_backward_prop_end(model *m) {
+
+  const auto comm = m->get_comm();
+  const bool is_first_step = (!m_has_kronecker_inverse);
+  
   // Update the damping value
   // using a modified Tikhonov damping tequnique from
   // http://arxiv.org/abs/1811.12019
@@ -126,7 +194,7 @@ void kfac<Device>::on_backward_prop_end(model *m) {
   }
 
   // Get some configs
-  const auto comm = m->get_comm();
+  // const auto comm = m->get_comm();
   const auto& context = static_cast<const sgd_execution_context&>(m->get_execution_context());
   const size_t num_steps = context.get_step();
   const auto layers = m->get_layers();
@@ -203,11 +271,14 @@ void kfac<Device>::on_backward_prop_end(model *m) {
     prof_region_end("kfac-setup", prof_sync);
   }
 
+  if(m->get_comm()->get_grid_number() == 2 )
+  {
+
   prof_region_begin("kfac-step", prof_color, prof_sync);
 
   // Step 1: Ensure that each process has averaged Kronecker factors
   // for the model-parallel part.
-  const bool is_first_step = (!m_has_kronecker_inverse);
+  // const bool is_first_step = (!m_has_kronecker_inverse);
   const bool is_kronecker_update_required =
       ((num_steps%m_update_interval) == 0 || !m_has_kronecker_inverse);
   if(is_kronecker_update_required) {
@@ -301,6 +372,15 @@ void kfac<Device>::on_backward_prop_end(model *m) {
   prof_region_end("kfac-inverse-barrier", prof_sync);
 #endif // LBANN_NVPROF
 
+  }
+  else{
+    
+    m_has_kronecker_inverse = true;
+    // std::cout<<"Primary grid\n";
+  }
+
+
+
   // Step 3: All-gather of each preconditioned gradient tensor
   prof_region_begin("kfac-allgather", prof_color, prof_sync);
   {
@@ -330,8 +410,20 @@ void kfac<Device>::on_backward_prop_end(model *m) {
             "allgather_recv_buffer",
             is_buffer_needed.second ? global_buffer_size : 0,
             1);
-    kfac_util::allgather_blocks(
-        buffers, local_buffer, global_buffer, comm, allgather_mode);
+
+        
+    if(m->get_comm()->get_grid_number() == 2 ){
+      kfac_util::allgather_blocks(
+          buffers, local_buffer, global_buffer, comm, allgather_mode);
+    }
+
+    //Send precomputed gradients from secondary grid to primary grid 
+    send_recv_precomputed_gradients(buffers, 
+                                    global_buffer, 
+                                    global_buffer_size, 
+                                    comm,
+                                    allgather_mode);
+
   }
   prof_region_end("kfac-allgather", prof_sync);
 

@@ -138,6 +138,73 @@ void lbann_comm::split_trainers(
 
 }
 
+void lbann_comm::split_trainer_grid(
+  int num_process_primary_grid,
+  int num_process_secondary_grid)
+{
+  const int world_size = El::mpi::Size(m_trainer_comm.GetMPIComm());
+  num_process_primary_grid = world_size/2; 
+  std::cout<<"M trainer rank"<<m_rank_in_trainer<<" Primary grid:"<<num_process_primary_grid<<" world_size:"<<world_size<<"\n";
+  
+  // Check if parameters are valid
+  if (num_process_primary_grid +  num_process_secondary_grid > world_size) {
+    LBANN_ERROR(
+      "Not enough processes to split the trainer; procs_per_trainer: ",
+      world_size,
+      " is smaller than sum of num processes for primary grid: ",
+      num_process_primary_grid,
+      " and secondary grid: ",
+      num_process_secondary_grid);
+  }
+  if (num_process_primary_grid == 0) {
+    LBANN_ERROR("Procs for primary grid in a trainer cannot be zero.");
+  }
+
+  if(num_process_secondary_grid == 0 and (num_process_primary_grid == world_size)){
+    return ;
+  }
+
+  if(num_process_secondary_grid==0){
+    num_process_secondary_grid = world_size - num_process_primary_grid;
+  }
+
+  // m_trainer_rank = El::mpi::Rank(m_trainer_comm.GetMPIComm());
+
+
+  int color = -1;
+  int rank_in_split_comm;
+  if(m_rank_in_trainer < num_process_primary_grid){
+    color = 0;
+    rank_in_split_comm = m_rank_in_trainer % num_process_primary_grid;
+    m_grid_number = 1;
+    m_rank_in_trainer = rank_in_split_comm;
+    m_procs_per_trainer = num_process_primary_grid;
+  }
+  else{
+    color = 1;
+    rank_in_split_comm = (m_rank_in_trainer - num_process_primary_grid) % num_process_secondary_grid;
+    m_grid_number = 2;
+    m_rank_in_trainer = rank_in_split_comm;
+    m_procs_per_trainer = num_process_secondary_grid;
+  }
+
+
+  // Split comm between primary and secondary grid
+  El::mpi::Split(m_trainer_comm,
+                 color,
+                 rank_in_split_comm,
+                 m_primary_grid_comm);
+
+  El::mpi::Dup(m_trainer_comm, m_combined_grid_comm);
+  El::mpi::Dup(m_primary_grid_comm, m_trainer_comm);
+  // El::mpi::Dup(m_primary_grid_comm, m_world_comm);
+
+  // Initialize Elemental grid for trainer
+  m_grid = make_unique<El::Grid>(
+    m_trainer_comm.GetMPIComm(), 1);
+
+}
+
 void lbann_comm::intertrainer_sum_matrix(AbsMat& mat) const
 {
   m_bytes_sent += sizeof(DataType) * mat.Height() * mat.Width();

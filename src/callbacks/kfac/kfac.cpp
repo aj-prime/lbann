@@ -92,7 +92,145 @@ void kfac<Device>::on_epoch_end(model *m) {
 }
 
 
+template <El::Device Device>
+void kfac<Device>::sync_weights_model(model *m, lbann_comm *comm){
+  //Does not support Model parallel only Data Parallel
 
+  const auto layers = m->get_layers();
+  const El::mpi::Comm & combined_comm = comm->get_combined_grid_comm();
+  const El::mpi::Comm & trainer_comm = comm->get_trainer_comm();
+  const int comm_size = El::mpi::Size(comm->get_trainer_comm().GetMPIComm());
+  const int comm_rank = El::mpi::Rank(comm->get_trainer_comm().GetMPIComm());
+
+  //Computing size of global buffer
+  int global_buffer_size = 0;
+  for(auto i_layer = layers.begin(); i_layer != layers.end(); i_layer++) 
+  {
+    const auto &layer = *i_layer;
+    const size_t num_weights = layer->num_weights();
+    for (int idx_weight = 0; idx_weight < num_weights; ++idx_weight)
+    {
+      auto& weights = layer->get_weights(idx_weight);
+
+      //Ignore weights without optimizer
+      // const optimizer *w_optimizer = weights.get_optimizer();
+      // if(w_optimizer == nullptr)
+      //   continue;
+
+      int height = weights.get_matrix_height();
+      int width = weights.get_matrix_width();
+      global_buffer_size += height*width;
+    }
+  }
+
+  // std::cout<<"Size of global buffer:"<<global_buffer_size<<"\n";
+
+  El::Matrix<DataType, Device> global_buffer(global_buffer_size, 1);
+  El::SyncInfo<Device> sync_info =El::SyncInfoFromMatrix(global_buffer);
+
+
+
+
+  size_t offset = 0;
+  //copy weights to global buffers
+  for(auto i_layer = layers.begin(); i_layer != layers.end(); i_layer++) 
+  {
+    const auto &layer = *i_layer;
+    const size_t num_weights = layer->num_weights();
+    for (int idx_weight = 0; idx_weight < num_weights; ++idx_weight)
+    {
+      auto& weights = layer->get_weights(idx_weight);
+
+      //Ignore weights without optimizer
+      // const optimizer *w_optimizer = weights.get_optimizer();
+      // if(w_optimizer == nullptr)
+      //   continue;
+
+      data_type_weights<DataType>* weights_dt = dynamic_cast<data_type_weights<DataType>*>(&weights);
+
+      int height = weights.get_matrix_height();
+      int width = weights.get_matrix_width();
+
+      El::AbstractDistMatrix<DataType>& weight_values = weights_dt->get_values();
+      El::DistMatrix<DataType,El::STAR,El::STAR,El::ELEMENT,Device>* weight_values_ = dynamic_cast<El::DistMatrix<DataType,El::STAR,El::STAR,El::ELEMENT,Device>*>(&weight_values);
+
+      auto view = El::View(global_buffer, El::IR(offset, offset+height*width), El::ALL);
+      offset += height*width;
+
+      // El::Copy(weight_values.LockedMatrix(), view);
+      El::copy::util::InterleaveMatrix(
+                                height, width,
+                                weight_values_->LockedBuffer(), 1, height,
+                                view.Buffer(),
+                                1, height,
+                                sync_info);
+    }
+  }
+
+
+  if(comm->get_grid_number() == 1)
+  {
+    ::El::mpi::Send(
+       (DataType*)global_buffer.Buffer(),
+       global_buffer_size,
+       comm_rank+comm_size,
+       combined_comm.GetMPIComm(),
+       sync_info);
+
+  }
+  if(comm->get_grid_number() == 2)
+  {
+    ::El::mpi::Recv(
+       (DataType*)global_buffer.Buffer(),
+       global_buffer_size,
+       comm_rank,
+       combined_comm.GetMPIComm(),
+       sync_info);
+  }
+
+
+
+
+  //copy weights to global buffers
+  offset = 0;
+  for(auto i_layer = layers.begin(); i_layer != layers.end(); i_layer++) 
+  {
+    const auto &layer = *i_layer;
+    const size_t num_weights = layer->num_weights();
+    for (int idx_weight = 0; idx_weight < num_weights; ++idx_weight)
+    {
+      auto& weights = layer->get_weights(idx_weight);
+
+      //Ignore weights without optimizer
+      // const optimizer *w_optimizer = weights.get_optimizer();
+      // if(w_optimizer == nullptr)
+      //   continue;
+
+      data_type_weights<DataType>* weights_dt = dynamic_cast<data_type_weights<DataType>*>(&weights);
+
+      int height = weights.get_matrix_height();
+      int width = weights.get_matrix_width();
+
+      El::Matrix<DataType, Device> weight_buffer(height, width);
+
+      El::AbstractDistMatrix<DataType>& weight_values = weights_dt->get_values();
+      El::DistMatrix<DataType,El::STAR,El::STAR,El::ELEMENT,Device>* weight_values_ = dynamic_cast<El::DistMatrix<DataType,El::STAR,El::STAR,El::ELEMENT,Device>*>(&weight_values);
+
+      auto view = El::View(global_buffer, El::IR(offset, offset+height*width), El::ALL);
+      offset += height*width;
+
+      El::copy::util::InterleaveMatrix(
+                                height, width,
+                                view.Buffer(), 1, height,
+                                weight_values_->Buffer(),
+                                1, height,
+                                sync_info);
+      // weights.set_values(weight_buffer);
+    }
+  }
+
+
+}
 
 template <typename DataType, El::Device Device>
 void send_recv_precomputed_gradients(
@@ -418,6 +556,7 @@ void kfac<Device>::on_backward_prop_end(model *m) {
     }
 
     //Send precomputed gradients from secondary grid to primary grid 
+    sync_weights_model(m, comm);
     send_recv_precomputed_gradients(buffers, 
                                     global_buffer, 
                                     global_buffer_size, 

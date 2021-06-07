@@ -124,6 +124,9 @@ class kfac : public callback_base {
   void on_epoch_end(model *m) override;
   void on_backward_prop_end(model *m, Layer *l) override {}
 
+
+  void sync_weights_model(model *m, lbann_comm *comm);
+
   /** @brief Gets the Kronecker factor matrix of a FC layer.
    *  The same key is tied with the same matrix instance. */
   El::Matrix<DataType, Device>& get_workspace_matrix(

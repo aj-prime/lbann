@@ -143,7 +143,13 @@ void lbann_comm::split_trainer_grid(
   int num_process_secondary_grid)
 {
   const int world_size = El::mpi::Size(m_trainer_comm.GetMPIComm());
+
+  // If primary grid size is not given then split resources equally between
+  // primary and secondary grid
+  if (num_process_primary_grid == 0){
   num_process_primary_grid = world_size/2; 
+  }
+
   std::cout<<"M trainer rank"<<m_rank_in_trainer<<" Primary grid:"<<num_process_primary_grid<<" world_size:"<<world_size<<"\n";
   
   // Check if parameters are valid
@@ -187,6 +193,27 @@ void lbann_comm::split_trainer_grid(
     m_rank_in_trainer = rank_in_split_comm;
     m_procs_per_trainer = num_process_secondary_grid;
   }
+
+  // Update ranks in primary and secondary grids
+  for (int rank = 0; rank < num_process_primary_grid; ++rank){
+    m_primary_grid_ranks.push_back(rank);
+  }
+  for (int rank = num_process_primary_grid; 
+        rank < num_process_primary_grid + num_process_secondary_grid; 
+        ++rank){
+    m_secondary_grid_ranks.push_back(rank);
+  }
+
+  std::cout<<"Primary Grid:";
+  for (auto it = m_primary_grid_ranks.begin(); it != m_primary_grid_ranks.end(); it++)
+        std::cout << *it << " ";
+  std::cout<<"\n";
+
+  std::cout<<"Secondary Grid:";
+  for (auto it = m_secondary_grid_ranks.begin(); it != m_secondary_grid_ranks.end(); it++)
+        std::cout << *it << " ";
+  std::cout<<"\n";
+
 
 
   // Split comm between primary and secondary grid

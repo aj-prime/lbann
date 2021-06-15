@@ -888,6 +888,16 @@ public:
   /** Return the communicator for this node. */
   const El::mpi::Comm& get_node_comm() const noexcept { return m_node_comm; }
 
+  /** Return the ranks of primary grid in the trainer */
+  std::vector<int> get_primary_grid_ranks(){
+    return m_primary_grid_ranks;
+  }
+
+  /** Return the ranks of secondary grid in the trainer */
+  std::vector<int> get_secondary_grid_ranks(){
+    return m_secondary_grid_ranks;
+  }
+
   /**
    * Return a communicator containing num_per_group processors.
    *
@@ -954,6 +964,12 @@ private:
    *  num_threads directive has not been provided.
    */
   int m_threads_per_proc;
+
+  /**
+  Ranks in primary and secondary grids
+  */
+  std::vector<int> m_primary_grid_ranks;
+  std::vector<int> m_secondary_grid_ranks;
 
   // Various statistics counters.
   mutable size_t m_num_trainer_barriers;

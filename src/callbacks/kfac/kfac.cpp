@@ -182,12 +182,12 @@ void kfac<Device>::sync_weights_model(model *m, lbann_comm *comm){
 
       if(comm_rank + num_send*num_process_primary_grid < num_process_secondary_grid){
         int to_send_index = comm_rank + num_send*num_process_primary_grid;
-        std::cout<<"My CommRank:"<<comm_rank<<" Send:"<<secondary_grid_ranks[to_send_index]<<"\n";
+        // std::cout<<"My CommRank:"<<comm_rank<<" Send:"<<secondary_grid_ranks[to_send_index]<<"\n";
         ::El::mpi::Send(
            (DataType*)global_buffer.Buffer(),
            global_buffer_size,
            secondary_grid_ranks[to_send_index],
-           combined_comm.GetMPIComm(),
+           combined_comm,
            sync_info);
       }
     }
@@ -196,12 +196,12 @@ void kfac<Device>::sync_weights_model(model *m, lbann_comm *comm){
   if(comm->get_grid_number() == 2)
   {
     int recv_index = comm_rank % num_process_primary_grid;
-    std::cout<<"My CommRank:"<<comm_rank<<" Recv:"<<primary_grid_ranks[recv_index]<<"\n";
+    // std::cout<<"My CommRank:"<<comm_rank<<" Recv:"<<primary_grid_ranks[recv_index]<<"\n";
     ::El::mpi::Recv(
        (DataType*)global_buffer.Buffer(),
        global_buffer_size,
        primary_grid_ranks[recv_index],
-       combined_comm.GetMPIComm(),
+       combined_comm,
        sync_info);
   }
 
@@ -295,35 +295,43 @@ void send_recv_precomputed_gradients(
 
 
         int to_send_index = comm_rank + num_send*num_process_secondary_grid;
-        std::cout<<"My CommRank:"<<comm_rank <<" "<<combined_rank<<" Send:"<<primary_grid_ranks[to_send_index]<<"\n";
+        // std::cout<<"My CommRank:"<<comm_rank <<" "<<combined_rank<<" Send:"<<primary_grid_ranks[to_send_index]<<"\n";
         ::El::mpi::TaggedSend(
            (DataType*)global_buffer_local.Buffer(),
            data_size,
            primary_grid_ranks[to_send_index],
            primary_grid_ranks[to_send_index],
-           combined_comm.GetMPIComm(),
+           combined_comm,
            sync_info);
-        std::cout<<"Comp My CommRank:"<<comm_rank <<" "<<combined_rank<<" Send:"<<primary_grid_ranks[to_send_index]<<"\n";
+        // ::El::Send(
+        //    global_buffer_local,
+        //    combined_comm,
+        //    primary_grid_ranks[to_send_index]);
+        // std::cout<<"Comp My CommRank:"<<comm_rank <<" "<<combined_rank<<" Send:"<<primary_grid_ranks[to_send_index]<<"\n";
       }
     }
-    ::El::mpi::Barrier(combined_comm.GetMPIComm());
+    // ::El::mpi::Barrier(combined_comm.GetMPIComm());
 
   }
   if(comm->get_grid_number() == 1)
   {
     El::SyncInfo<Device> sync_info =El::SyncInfoFromMatrix(global_buffer);
     int recv_index = comm_rank % num_process_secondary_grid;
-    std::cout<<"My CommRank:"<<comm_rank <<" "<<combined_rank<<" Recv:"<<secondary_grid_ranks[recv_index]<<"\n";
+    // std::cout<<"My CommRank:"<<comm_rank <<" "<<combined_rank<<" Recv:"<<secondary_grid_ranks[recv_index]<<"\n";
     ::El::mpi::TaggedRecv(
        (DataType*)global_buffer.Buffer(),
        data_size,
        secondary_grid_ranks[recv_index],
        combined_rank,
-       combined_comm.GetMPIComm(),
+       combined_comm,
        sync_info);
-    std::cout<<"Comp My CommRank:"<<comm_rank <<" "<<combined_rank<<" Recv:"<<secondary_grid_ranks[recv_index]<<"\n";
+    // ::El::Recv(
+    //    global_buffer,
+    //    combined_comm,
+    //    secondary_grid_ranks[recv_index]);
+    // std::cout<<"Comp My CommRank:"<<comm_rank <<" "<<combined_rank<<" Recv:"<<secondary_grid_ranks[recv_index]<<"\n";
 
-    ::El::mpi::Barrier(combined_comm.GetMPIComm());
+    // ::El::mpi::Barrier(combined_comm.GetMPIComm());
 
     // Sort blocks so that received blocks per process become
     // contiguous.
@@ -616,7 +624,7 @@ void kfac<Device>::on_backward_prop_end(model *m) {
     }
 
     //Send precomputed gradients from secondary grid to primary grid 
-    // sync_weights_model(m, comm);
+    sync_weights_model(m, comm);
     send_recv_precomputed_gradients(buffers, 
                                     global_buffer, 
                                     global_buffer_size, 
